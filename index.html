@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สถิติผู้รับบริการ</title>
+<meta name="description" content="จำนวนผู้รับบริการ ช่วงเวลาที่คนมาเยอะ และเวลาที่ใช้ในแต่ละจุดบริการ">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- หน้าสาธารณะ: ข้อมูลมาจาก data.json ที่เซิร์ฟเวอร์ kiosk ส่งขึ้นทุก 15 นาที (public-dashboard/publish.mjs) เป็นยอดรวมเท่านั้น -->
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3f6f9; --surface: #fff; --text: #1d2733; --muted: #5f6b7a; --line: #d6dde5;
+    --primary: #0b6e4f; --primary-2: #13896a; --warn-bg: #fff4e5; --warn: #9a4d00;
+    --series: #2a78d6; --alt: #eb6834; --stay: #1baf7a; --violet: #6250d6; --magenta: #e87ba4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #101418; --surface: #1a1f25; --text: #f0efec; --muted: #b4bcc6; --line: #333b45;
+      --warn-bg: #3a2a12; --warn: #f5b971;
+      --series: #3987e5; --alt: #d95926; --stay: #199e70; --violet: #9085e9; --magenta: #d55181;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #101418; --surface: #1a1f25; --text: #f0efec; --muted: #b4bcc6; --line: #333b45;
+    --warn-bg: #3a2a12; --warn: #f5b971;
+    --series: #3987e5; --alt: #d95926; --stay: #199e70; --violet: #9085e9; --magenta: #d55181;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: "Sarabun", "Leelawadee UI", Tahoma, sans-serif; }
+  header { background: linear-gradient(90deg, var(--primary), var(--primary-2)); color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 24px; }
+  header p { margin: 2px 0 0; opacity: .9; font-size: 15px; }
+  main { max-width: 1160px; margin: 0 auto; padding: 16px 16px 32px; }
+  #stale { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-weight: 600; }
+  #stale[hidden] { display: none; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
+  .tile, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .tile { padding: 14px 16px 14px 20px; min-width: 0; position: relative; overflow: hidden; }
+  .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--accent, var(--series)); }
+  .tile .k { color: var(--muted); font-size: 15px; }
+  .tile .k::before {
+    content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 8px; background: var(--accent, var(--series)); vertical-align: 1px;
+  }
+  .tile .v { font-size: 36px; font-weight: 800; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .tile .s { color: var(--muted); font-size: 14px; }
+  .panel { padding: 16px; margin-top: 12px; min-width: 0; }
+  .panel h2 { font-size: 19px; margin: 0; border-left: 4px solid var(--accent, var(--series)); padding-left: 10px; }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 12px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 2px 0 10px; }
+  .chart svg { display: block; width: 100%; }
+  .chart text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+  .chart .grid { stroke: var(--line); stroke-width: 1; }
+  .chart .bar { fill: var(--series); }
+  .chart .bar.alt { fill: var(--alt); }
+  .chart .hit { fill: transparent; }
+  .chart g:hover .bar { opacity: .75; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+  .legend i { display: inline-block; vertical-align: middle; margin-right: 6px; width: 18px; height: 10px; border-radius: 3px; background: var(--series); }
+  .legend i.alt { background: var(--alt); }
+  .point { display: grid; grid-template-columns: minmax(120px, 230px) 1fr 76px; gap: 10px; align-items: center; padding: 5px 0; font-size: 15px; }
+  .point .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { height: 18px; }
+  .track .b { height: 14px; margin-top: 2px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--stay); }
+  .point .m { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .note { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 0; }
+  .note li { margin-bottom: 2px; }
+  #tip {
+    position: fixed; z-index: 10; pointer-events: none; padding: 6px 10px; border-radius: 8px; font-size: 14px;
+    background: var(--text); color: var(--bg); white-space: pre-line;
+  }
+  #tip[hidden] { display: none; }
+  @media (max-width: 560px) {
+    header { padding: 12px 16px; }
+    header h1 { font-size: 20px; }
+    main { padding: 12px 16px; }
+    .point { grid-template-columns: 1fr 70px; }
+    .point .track { grid-column: 1 / -1; grid-row: 2; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>สถิติผู้รับบริการ</h1>
+  <p id="updated">กำลังโหลดข้อมูล...</p>
+</header>
+<main>
+  <div id="stale" hidden></div>
+  <div class="tiles" id="tiles"></div>
+
+  <section class="panel">
+    <h2>ผู้รับบริการรายวัน (30 วันล่าสุด)</h2>
+    <p class="sub">จำนวนครั้งที่มารับบริการต่อวัน</p>
+    <div class="legend"><span><i></i>จันทร์-ศุกร์</span><span><i class="alt"></i>เสาร์-อาทิตย์</span></div>
+    <div class="chart" id="daily"></div>
+  </section>
+
+  <div class="two">
+    <section class="panel">
+      <h2>ช่วงเวลาที่คนมารับบริการ</h2>
+      <p class="sub">จำนวนเฉลี่ยต่อวัน แยกตามชั่วโมงที่ลงทะเบียน ช่วงแท่งสูง = คนมาก</p>
+      <div class="legend"><span><i></i>ในเวลาราชการ 07:30-16:00 น.</span><span><i class="alt"></i>นอกเวลาราชการ</span></div>
+      <div class="chart" id="hourly"></div>
+    </section>
+    <section class="panel" style="--accent: var(--stay)">
+      <h2>เวลาที่ใช้ในแต่ละจุดบริการ (นาที)</h2>
+      <p class="sub">ค่ากลาง (ครึ่งหนึ่งของผู้รับบริการใช้เวลาไม่เกินนี้) รวมเวลารอและรับบริการ</p>
+      <div id="points"></div>
+    </section>
+  </div>
+
+  <section class="panel" style="--accent: var(--muted)">
+    <h2>เกี่ยวกับข้อมูลนี้</h2>
+    <ul class="note">
+      <li>ข้อมูลจากระบบโรงพยาบาล ปรับปรุงทุก 15 นาที แสดงเฉพาะยอดรวม ไม่มีข้อมูลรายบุคคล</li>
+      <li>ไม่นับรายการที่ยกเลิก และบริการที่ไม่ได้มาโรงพยาบาล เช่น รับยาที่บ้าน รพ.สต. Telemedicine</li>
+      <li>เวลาที่จุดบริการนับตั้งแต่เข้าจุดจนเสร็จจากจุด แสดงเฉพาะจุดที่บันทึกเวลาครบ</li>
+    </ul>
+  </section>
+</main>
+<div id="tip" hidden></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const SVG = 'http://www.w3.org/2000/svg';
+  const num = (n) => Number(n).toLocaleString('th-TH');
+  const thaiDay = (d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  const ceDate = (be) => `${Number(be.slice(0, 4)) - 543}${be.slice(4)}`; // วันที่จากระบบเป็น พ.ศ.
+  const STALE_MS = 60 * 60_000; // ข้อมูลเก่ากว่า 1 ชั่วโมง = เซิร์ฟเวอร์ส่งไม่ได้ แจ้งผู้ชม
+  let data = null;
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function svgEl(tag, attrs, text) {
+    const e = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function tip(target, text) {
+    const showTip = (ev) => {
+      const t = $('tip');
+      t.textContent = text;
+      t.hidden = false;
+      const x = Math.min(ev.clientX + 12, innerWidth - t.offsetWidth - 8);
+      t.style.left = `${Math.max(x, 8)}px`;
+      t.style.top = `${Math.max(ev.clientY - t.offsetHeight - 10, 8)}px`;
+    };
+    target.addEventListener('pointermove', showTip);
+    target.addEventListener('pointerleave', () => { $('tip').hidden = true; });
+  }
+
+  // กราฟแท่งแกนเดียว items = [{ label, value, alt, tip }]
+  function bars(box, items, height = 240) {
+    box.replaceChildren();
+    if (!items.length) { box.append(el('p', 'sub', 'ไม่มีข้อมูล')); return; }
+    const w = Math.max(box.clientWidth, 280);
+    const m = { top: 10, right: 6, bottom: 24, left: 38 };
+    const iw = w - m.left - m.right, ih = height - m.top - m.bottom;
+    const max = Math.max(...items.map((i) => i.value), 1);
+    const step = 10 ** Math.floor(Math.log10(max));
+    const nice = [1, 2, 5, 10].map((k) => k * step).find((s) => max / s <= 5) ?? step;
+    const top = Math.ceil(max / nice) * nice;
+    const y = (v) => m.top + ih - (v / top) * ih;
+    const svg = svgEl('svg', { viewBox: `0 0 ${w} ${height}`, height, role: 'img', 'aria-label': box.dataset.label ?? 'กราฟ' });
+    for (let v = 0; v <= top + 1e-9; v += nice) {
+      svg.append(svgEl('line', { class: 'grid', x1: m.left, x2: w - m.right, y1: y(v), y2: y(v) }));
+      svg.append(svgEl('text', { x: m.left - 6, y: y(v) + 4, 'text-anchor': 'end' }, num(+v.toFixed(1))));
+    }
+    const slot = iw / items.length;
+    const every = Math.ceil(items.length / Math.max(Math.floor(iw / 58), 1));
+    items.forEach((it, i) => {
+      const x = m.left + i * slot;
+      const g = svgEl('g', {});
+      const bw = Math.max(slot - 2, 1);
+      const h = Math.max(ih * it.value / top, it.value ? 1 : 0);
+      const r = Math.min(4, bw / 2, h);
+      const by = m.top + ih;
+      g.append(svgEl('path', { class: it.alt ? 'bar alt' : 'bar', d: `M${x},${by}V${by - h + r}Q${x},${by - h} ${x + r},${by - h}H${x + bw - r}Q${x + bw},${by - h} ${x + bw},${by - h + r}V${by}Z` }));
+      g.append(svgEl('rect', { class: 'hit', x, y: m.top, width: slot, height: ih + m.bottom }));
+      tip(g, it.tip);
+      svg.append(g);
+      if (i % every === 0) svg.append(svgEl('text', { x: x + bw / 2, y: height - 7, 'text-anchor': 'middle' }, it.label));
+    });
+    box.append(svg);
+  }
+
+  function tile(k, v, s, accent) {
+    const t = el('div', 'tile');
+    t.style.setProperty('--accent', `var(--${accent})`);
+    t.append(el('div', 'k', k), el('div', 'v', v), el('div', 's', s ?? ''));
+    return t;
+  }
+
+  function render() {
+    if (!data) return;
+    const updated = new Date(data.updatedAt);
+    $('updated').textContent = `ข้อมูล ณ ${updated.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.`;
+    const stale = Date.now() - updated > STALE_MS;
+    $('stale').hidden = !stale;
+    $('stale').textContent = 'ข้อมูลยังไม่ได้ปรับปรุงเกิน 1 ชั่วโมง ตัวเลข "วันนี้" อาจไม่ตรงกับปัจจุบัน';
+
+    const days = data.daily.length || 1;
+    const total = data.daily.reduce((a, d) => a + d.visits, 0);
+    const busiest = data.hourly.reduce((a, h) => (h.visits > (a?.visits ?? -1) ? h : a), null);
+    const crowded = data.latest.crowded;
+    $('tiles').replaceChildren(
+      tile(`ผู้รับบริการวันนี้`, num(data.latest.today), `ยังอยู่ในโรงพยาบาล ${num(data.latest.open)} ราย`, 'series'),
+      tile('เฉลี่ยต่อวัน', num(Math.round(total / days)), `30 วันล่าสุด (รวมวันหยุด)`, 'violet'),
+      tile('ช่วงที่คนมากที่สุด', busiest ? `${busiest.hour}:00 น.` : '-', busiest ? `เฉลี่ย ${(busiest.visits / days).toFixed(0)} รายต่อวันในชั่วโมงนี้` : '', 'alt'),
+      tile('จุดที่คนรอมากที่สุดตอนนี้', crowded && !stale ? num(crowded.waiting) : '-', crowded && !stale ? crowded.name : 'ไม่มีคนรอ', 'magenta'),
+    );
+
+    bars($('daily'), data.daily.map((d) => {
+      const iso = ceDate(d.day);
+      const dow = new Date(iso).getDay();
+      const weekday = new Date(iso).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'short' });
+      return { label: thaiDay(iso), value: d.visits, alt: dow === 0 || dow === 6, tip: `${weekday}\n${num(d.visits)} ราย` };
+    }));
+
+    const first = data.hourly[0]?.hour ?? 0, last = data.hourly.at(-1)?.hour ?? 0;
+    const hours = [];
+    for (let h = first; h <= last; h++) {
+      const v = (data.hourly.find((r) => r.hour === h)?.visits ?? 0) / days;
+      hours.push({ label: `${h}:00`, value: v, alt: h < 7 || h >= 16, tip: `${h}:00-${h}:59 น.\nเฉลี่ย ${v.toFixed(1)} รายต่อวัน` });
+    }
+    bars($('hourly'), hours, 280);
+
+    const pts = [...data.points].sort((a, b) => b.stay_p50 - a.stay_p50);
+    const scale = Math.max(...pts.map((p) => p.stay_p50), 1);
+    $('points').replaceChildren(...pts.map((p) => {
+      const row = el('div', 'point');
+      const track = el('div', 'track');
+      const b = el('div', 'b');
+      b.style.width = `${(p.stay_p50 / scale) * 100}%`;
+      track.append(b);
+      row.append(el('div', 'n', p.name), track, el('div', 'm', `${p.stay_p50} นาที`));
+      tip(row, `${p.name}\nค่ากลาง ${p.stay_p50} นาที\nจาก ${num(p.visits)} รายการใน 30 วัน`);
+      return row;
+    }));
+    if (!pts.length) $('points').append(el('p', 'sub', 'ไม่มีข้อมูลเวลา'));
+  }
+
+  async function load() {
+    try {
+      const r = await fetch(`data.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      data = await r.json();
+      render();
+    } catch {
+      $('updated').textContent = 'โหลดข้อมูลไม่ได้ กรุณาลองใหม่ภายหลัง';
+    }
+  }
+
+  let resizeTimer;
+  addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+  load();
+  setInterval(load, 5 * 60_000);
+</script>
+</body>
+</html>
